@@ -1,0 +1,268 @@
+---
+title: "Compile F2G with Demographics"
+author: "Joelle Jee"
+date: "January 28, 2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+if (!requireNamespace("tidyverse")) {
+  install.packages("tidyverse")
+}
+
+if (!requireNamespace("readxl")) {
+  install.packages("readxl")
+}
+
+library(tidyverse)
+
+project = project = file.path('/Users', Sys.info()['user'], 'Library', 
+                    'CloudStorage', 'Box-Box', 
+                    'Craniofacial Study', 'final_emotrics_f2g_analysis')
+
+# make directory for today's date
+today = format(Sys.Date(), "%m%d%y")
+outdir = file.path(project, 'tables', 'F2G', today)
+dir.create(outdir)
+
+```
+
+
+# Read demographics data
+
+```{r}
+
+# read the most recent demographics master file
+find_latest <- function(dir) {
+  files = list.files(dir)
+  files = gsub("F2G", "", files) %>%
+    gsub("\\D", "", .) %>% 
+    as.Date('%m%d%y')
+  
+  latest = sort(files, decreasing = TRUE)[1]
+  latest = format(latest, '%m%d%y')
+  
+}
+
+
+# read the most recent demographics master file
+latest = find_latest(file.path(project, 'demographics'))
+master_demo <- list.files(file.path(project, 'demographics'))
+master_demo = master_demo[endsWith(master_demo, paste0(latest, '.csv'))]
+master_demo <- read.csv(file.path(project, 
+                                  'demographics', 
+                                  master_demo), 
+                        check.names = FALSE)
+master_demo$`In-lab Picture` = as.numeric(master_demo$`In-lab Picture`)
+master_demo
+```
+
+# Read CHOP data
+
+## F2G data
+
+```{r}
+
+latest = find_latest(file.path(project, 'F2G', 'data'))
+chop_fname = file.path(project, 'F2G', 'data', 
+                       paste0('CHOP_F2G_demo_and_syndromes_masterfile_',
+                              latest, '.xlsx'))
+
+(chop_syndromes <- readxl::read_excel(chop_fname, sheet = "detected syndromes"))
+```
+
+## Demographics Data
+
+## Merge the demographics and F2G data by Case ID
+
+```{r}
+chop_demo <- master_demo[grepl('22q',master_demo$group), ]
+chop_demo = chop_demo[grepl('1', chop_demo$f2g),]
+chop_tp1 <- merge(chop_syndromes, chop_demo, by='case_id') %>%
+  select(colnames(master_demo), syndrome_name, gestalt_score)
+chop_tp1
+```
+
+### Make sure that f2g columns are all 1 in the master file for those that have f2g data
+
+```{r}
+chop_tp1[chop_tp1$f2g != 1,]
+```
+
+
+### Make sure that f2g column in master file are 0 for those that don't have f2g data
+
+```{r}
+chop_demo[!chop_demo$case_id %in% chop_syndromes$case_id, ]
+```
+
+## BBLIDs that have less than 30 syndromes
+
+```{r}
+chop_total_count = chop_tp1 %>%
+  group_by(bbl_id) %>%
+  count()
+
+chop_total_count[chop_total_count$n != 30,]
+```
+
+
+## Wide Version
+```{r}
+(chop_tp1_wide <- spread(chop_tp1, syndrome_name, gestalt_score, fill = 0))
+
+```
+
+
+
+```{r}
+
+write_csv(chop_tp1,
+          file.path(outdir, paste0('chop_tp1_longV_f2g_', today, '.csv')))
+
+write.csv(chop_tp1_wide, 
+          file.path(outdir, paste0('chop_tp1_wideV_f2g_', today, '.csv')),
+          row.names = FALSE)
+
+
+```
+
+
+# Read Penn data
+
+## Read Penn F2G data
+
+```{r}
+
+latest = find_latest(file.path(project, 'F2G', 'data'))
+penn_fname = file.path(project, 'F2G', 'data', 
+                       paste0('Penn_F2G_demo_and_syndromes_masterfile_',
+                              latest, '.xlsx'))
+(penn_syndrome <- readxl::read_excel(penn_fname, "detected syndromes") %>%
+    rename('bbl_id' = bblid))
+```
+
+## Merge F2G and demographics data
+
+```{r}
+penn_demo = master_demo[!grepl('22q', master_demo$group),]
+penn_demo = penn_demo[grepl('1', penn_demo$f2g),]
+penn_total <- merge(penn_syndrome, 
+                     penn_demo, 
+                     by=c('bbl_id', 'case_id')) %>%
+  select(colnames(master_demo), syndrome_name, gestalt_score)
+
+penn_total$group[penn_total$group == 'NC'] = 'TD'
+```
+
+Misaligned info on demographics and syndromes data.
+
+```{r}
+penn_total_count = penn_total %>% 
+  group_by(bbl_id) %>%
+  count()
+
+setdiff(penn_demo$bbl_id, penn_total_count$bbl_id)
+```
+Case id in demo for 10256 = 292984, in sydromes = 292985. BBLID 84332 doens't have syndromes file. F2G column in master file should be 0.
+
+
+### Make sure that f2g columns are all 1 in the master file for those that have f2g data
+
+```{r}
+penn_total[penn_total$f2g != 1,]
+```
+
+### Make sure that f2g column in master file are 0 for those that don't have f2g data
+
+```{r}
+penn_demo[! penn_demo$bbl_id %in%penn_total$bbl_id, ]
+```
+BBLID 10256 CASE ID is 292985 in syndromes data and 292984 in demographics data. Which one is it?
+
+### Make a version where SZ and CR are PS
+
+```{r}
+
+penn_total_psV = penn_total
+penn_total_psV$group[penn_total_psV$group %in% c('SZ', 'CR')] = 'PS'
+
+penn_total_psV
+
+```
+
+
+# Make wide version
+
+Write the wide version of merged penn chart
+```{r}
+(penn_total_wide <- spread(penn_total, syndrome_name, gestalt_score, fill = 0))
+```
+
+```{r}
+(penn_total_psV_wide <- spread(penn_total_psV, syndrome_name, gestalt_score, fill = 0))
+```
+
+
+## Write files
+
+```{r}
+write.csv(penn_total_wide, 
+          file.path(outdir, paste0('penn_sz_cr_wideV_f2g_', today, '.csv')),
+          row.names = FALSE)
+
+write.csv(penn_total, 
+          file.path(outdir, paste0('penn_sz_cr_longV_f2g_', today, '.csv')),
+          row.names = FALSE)
+
+write.csv(penn_total_psV_wide, 
+          file.path(outdir, paste0('penn_wideV_f2g_', today, '.csv')),
+          row.names = FALSE)
+
+write.csv(penn_total_psV,
+          file.path(outdir, paste0('penn_longV_f2g_', today, '.csv')),
+          row.names = FALSE)
+```
+
+```{r}
+penn_chop_tp1_psV_wide = bind_rows(penn_total_psV_wide,
+                                   chop_tp1_wide)
+syndromes = penn_chop_tp1_psV_wide[, !colnames(penn_chop_tp1_psV_wide) %in% colnames(master_demo)]
+syndromes[is.na(syndromes)] <- 0
+penn_chop_tp1_psV_wide[, !colnames(penn_chop_tp1_psV_wide) %in% colnames(master_demo)] = syndromes
+
+
+write.csv(penn_chop_tp1_psV_wide,
+          file.path(outdir, paste0('penn_chop_tp1_wideV_f2g_', today, '.csv')),
+          row.names = FALSE)
+
+```
+
+
+```{r}
+
+write.csv(bind_rows(penn_total_psV,
+                    chop_tp1),
+          file.path(outdir, paste0('penn_chop_tp1_longV_f2g_', today, '.csv')),
+          row.names = FALSE)
+
+write.csv(bind_rows(penn_total,
+                    chop_tp1),
+          file.path(outdir, paste0('penn_szcr_chop_tp1_longV_f2g_', today, '.csv')),
+          row.names = FALSE)
+```
+
+```{r}
+penn_chop_tp1_wide = bind_rows(penn_total_wide,
+                                   chop_tp1_wide)
+syndromes = penn_chop_tp1_wide[, !colnames(penn_chop_tp1_wide) %in% colnames(master_demo)]
+syndromes[is.na(syndromes)] <- 0
+penn_chop_tp1_wide[, !colnames(penn_chop_tp1_wide) %in% colnames(master_demo)] = syndromes
+
+write.csv(bind_rows(penn_total_wide,
+                    chop_tp1_wide),
+          file.path(outdir, paste0('penn_szcr_chop_tp1_wideV_f2g_', today, '.csv')),
+          row.names = FALSE)
+```

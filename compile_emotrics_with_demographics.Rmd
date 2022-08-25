@@ -1,0 +1,223 @@
+---
+title: "Compile Emotrics with Demographics"
+author: "Joelle Jee"
+date: "January 28, 2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r, message=FALSE}
+if (!requireNamespace("tidyverse")) {
+  install.packages("tidyverse")
+}
+
+if (!requireNamespace("kableExtra")) {
+  install.packages("kableExtra")
+}
+
+if (!requireNamespace("knitr")) {
+  install.packages("knitr")
+}
+
+library(tidyverse)
+library(kableExtra)
+library(knitr)
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+project = file.path('/Users', Sys.info()['user'], 'Library', 
+                    'CloudStorage', 'Box-Box', 
+                    'Craniofacial Study', 'final_emotrics_f2g_analysis')
+
+# read the most recent demographics master file
+find_latest <- function(dir) {
+  files = list.files(dir)
+  files = gsub("\\D", "", files) %>% 
+    as.Date('%m%d%y')
+  
+  latest = sort(files, decreasing = TRUE)[1]
+  latest = format(latest, '%m%d%y')
+  
+}
+
+latest = find_latest(file.path(project, 'demographics'))
+master_demo <- list.files(file.path(project, 'demographics'))
+master_demo = master_demo[endsWith(master_demo, paste0(latest, '.csv'))]
+master_demo <- read.csv(file.path(project, 
+                                  'demographics', 
+                                  master_demo), 
+                        check.names = FALSE)
+master_demo$`In-lab Picture` = as.numeric(master_demo$`In-lab Picture`)
+master_demo
+```
+
+
+# Merge Penn data with demogrpahics
+
+## Load and rename Penn emotrics data columns
+
+```{r}
+latest = find_latest(file.path(project, 'Emotrics', 'tables'))
+penn_emo = paste0('penn_final_emotrics_', latest, '.csv')
+penn_emo <- read.csv(file.path(project, 
+                               'Emotrics',
+                               'tables',
+                               latest,
+                               penn_emo),
+                     check.names = FALSE)
+
+
+cols = sapply(1:ncol(penn_emo), 
+             FUN=function(x) {
+               col = colnames(penn_emo)[x]
+               if (col == 'bbl_id'){
+                 return(col)
+               } else if (col == 'philtrum') {
+                 return('Philtrum')
+               } else {
+                 col = paste(col, penn_emo[1, x], sep = '_')
+                 col = str_replace_all(col, ' ', '_')
+                 return(col)
+               }
+             })
+
+colnames(penn_emo) = cols
+
+penn_emo = penn_emo[,grepl('bbl_id|group|Right|Left|Philtrum', 
+                           colnames(penn_emo))] %>%
+  drop_na()
+
+penn_emo
+
+```
+
+## Merge with master demograhpics file
+
+### Penn subjects analyzed with Emotrics but missing demographics data
+
+```{r}
+penn_demo = master_demo[master_demo$group %in% c('CR', 'SZ', 'NC'),]
+penn_emo$bbl_id[!penn_emo$bbl_id %in% penn_demo$bbl_id]
+```
+
+
+### Penn subjects with demographics data but missing Emotrics file
+
+```{r}
+penn_demo[!penn_demo$bbl_id %in% penn_emo$bbl_id, ]
+```
+
+
+```{r}
+penn_merged = merge(master_demo, penn_emo)
+penn_merged$group[penn_merged$group == 'NC'] = 'TD'
+penn_merged
+```
+
+#### Make sure that the binary 'emotrics' column is all 1.
+
+```{r}
+penn_merged$bbl_id[penn_merged$emotrics == 0]
+```
+
+
+# Merge CHOP emotrics with demographics data
+
+## Load CHOP emotrics data
+
+```{r}
+chop_emo = paste0('chop_final_emotrics_', latest, '.csv')
+chop_emo <- read.csv(file.path(project, 
+                               'Emotrics',
+                               'tables',
+                               latest,
+                               chop_emo),
+                     check.names = FALSE)
+
+colnames(chop_emo) = cols
+chop_emo = chop_emo[, grepl('bbl_id|group|Right|Left|Philtrum', 
+                            colnames(chop_emo))] %>%
+  drop_na()
+
+chop_emo
+```
+
+## Merge with demographics data
+
+```{r}
+chop_merged = merge(master_demo, chop_emo)
+chop_merged
+```
+
+### CHOP BBLIDs that have no demographics data
+
+```{r}
+chop_merged[is.na(chop_merged$group), ]
+```
+Give group values to those BBLIDs
+
+```{r}
+chop_merged$group = '22q'
+```
+
+### Make sure that emotrics values are all 1
+
+```{r}
+chop_merged[chop_merged$emotrics !=1,]
+```
+
+# Make sure that in the master demographics file 'emotrics' == 0 for bblids that don't have emotrics data
+
+```{r}
+master_demo[!master_demo$bbl_id %in% c(chop_merged$bbl_id, penn_merged$bbl_id),
+            c('bbl_id', 'emotrics', 'emotrics_and_f2g')]
+```
+
+# Merge CHOP and Penn and write files
+
+```{r}
+chop_penn_sz_cr = bind_rows(penn_merged, chop_merged)
+
+# make directory for today's date
+today = format(Sys.Date(), "%m%d%y")
+outdir = file.path(project, 'tables', 'Emotrics', today)
+dir.create(outdir)
+
+write.csv(chop_penn_sz_cr,
+          file.path(outdir, 
+                    paste0('penn_sz_cr_chop_t1_emotrics_', today, '.csv')),
+          row.names = FALSE)
+
+write.csv(chop_merged,
+          file.path(outdir,
+                    paste0('chop_t1_emotrics_', today, '.csv')),
+          row.names = FALSE)
+
+write.csv(penn_merged,
+          file.path(outdir,
+                    paste0('penn_sz_cr_emotrics_', today, '.csv')),
+          row.names = FALSE)
+
+penn_merged$group[penn_merged$group %in% c('SZ', 'CR')] = 'PS'
+chop_penn = bind_rows(penn_merged, chop_merged)
+
+write.csv(penn_merged,
+          file.path(outdir,
+                    paste0('penn_emotrics_', today, '.csv')),
+          row.names = FALSE)
+
+write.csv(chop_penn,
+          file.path(outdir, 
+                    paste0('penn_chop_t1_emotrics_', today, '.csv')),
+          row.names = FALSE)
+
+```
+
+

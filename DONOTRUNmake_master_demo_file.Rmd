@@ -1,0 +1,123 @@
+---
+title: "Make Master Demographics File"
+author: "Joelle Jee"
+date: "January 28, 2022"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    theme: spacelab
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+if (!requireNamespace("tidyverse")) {
+  install.packages("tidyverse")
+}
+library("tidyverse")
+```
+
+# Master Demographics
+
+```{r}
+project = '/Users/jjee/Desktop/Craniofacial Morphology/final_emotrics_f2g_analysis'
+master_demo = readxl::read_excel(
+  file.path(project, 
+            'demographics',
+            'Penn_and_CHOP_combined_MasterFile_021022.xlsx'))
+
+master_demo
+```
+
+# Penn Demographics
+
+```{r}
+penn_demo = readxl::read_excel(
+  file.path(project, 
+            'demographics', 
+            'Penn_F2G_demo_and_syndromes_masterfile_040821.xlsx'),
+  sheet = 'demographics'
+)
+
+colnames(penn_demo) = tolower(colnames(penn_demo)) %>%
+  str_replace_all(" ", "_")
+
+penn_demo = penn_demo %>%
+  mutate(age = age_at_photo,
+         .keep = "unused") %>%
+  mutate(visit_id = 1) %>%
+  rename('case_id' = f2gcase_id)
+
+penn_demo
+```
+
+# CHOP Demographics
+s
+```{r}
+chop_demo = readxl::read_excel(
+  file.path(project,
+            'demographics',
+            'CHOP_F2GandEmotrics_Demos_Master.xlsx'),
+  sheet = 'master'
+)
+
+chop_demo$group = '22q'
+chop_demo = chop_demo %>% 
+  rename('visit_id' = tp_num,
+         'f2g_id' = vcfs_id)
+
+chop_demo
+```
+
+# Merge CHOP and Penn Demographics to Master
+
+```{r}
+vars <- c("bbl_id", "group", "f2g_id", "case_id", "photo_id", "visit_id",
+        "sex", "race", "age", "A-D Present", "VIQ", "PIQ", "FSIQ", "PS",
+        "emotrics", "f2g", "emotrics_and_f2g")
+
+master_demo = merge(master_demo, chop_demo, 
+                    by = 'bbl_id',
+                    all = TRUE) %>%
+  select(!ends_with('.y'))
+
+colnames(master_demo) = str_remove(colnames(master_demo), '\\.x$')
+master_demo = master_demo %>%
+  select(all_of(vars))
+
+master_demo
+```
+
+```{r}
+master_demo = merge(master_demo, penn_demo, 
+                    by = 'bbl_id',
+                    all = TRUE) %>%
+  select(starts_with(vars)) %>%
+  mutate(group.x = ifelse(is.na(group.x), group.y, group.x),
+         visit_id.x = ifelse(is.na(visit_id.x), visit_id.y, visit_id.x),
+         case_id.x = ifelse(is.na(case_id.x), case_id.y, case_id.x)) %>%
+  select(!ends_with('.y'))
+
+colnames(master_demo) = str_remove(colnames(master_demo), '\\.x$')
+master_demo = master_demo %>%
+  select(all_of(vars))
+
+master_demo
+```
+
+```{r}
+write.csv(master_demo,
+          file.path(project, 
+          'demographics', 
+          paste0('penn_and_chop_demographics_masterfile_',
+                 format(Sys.Date(), "%m%d%y"), '.csv')),
+          row.names = FALSE)
+```
+
+
+

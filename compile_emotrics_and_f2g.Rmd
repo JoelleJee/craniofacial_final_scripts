@@ -1,0 +1,127 @@
+---
+title: "Compile Emotrics and F2G"
+author: "Joelle Jee"
+date: "January 28, 2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r, message=FALSE}
+if (!requireNamespace("tidyverse")) {
+  install.packages("tidyverse")
+}
+
+if (!requireNamespace("kableExtra")) {
+  install.packages("kableExtra")
+}
+
+if (!requireNamespace("knitr")) {
+  install.packages("knitr")
+}
+
+library(tidyverse)
+library(kableExtra)
+library(knitr)
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, message=FALSE}
+library(tidyverse)
+library(kableExtra)
+library(knitr)
+
+project = file.path('/Users', Sys.info()['user'], 'Library', 
+                    'CloudStorage', 'Box-Box', 
+                    'Craniofacial Study', 'final_emotrics_f2g_analysis')
+
+```
+
+# Compile F2G and Emotrics
+
+```{r}
+# find the most recent F2G and Emotrics tables
+find_latest <- function(dir) {
+  files = list.files(dir)
+  files = gsub("F2G", "", files) %>%
+    gsub("\\D", "", .) %>% 
+    as.Date('%m%d%y')
+  
+  latest = sort(files, decreasing = TRUE)[1]
+  latest = format(latest, '%m%d%y')
+  
+}
+
+latest_f2g = find_latest(file.path(project, 'tables', 'F2G'))
+f2g = read.csv(file.path(project, 'tables', 'F2G', 
+                         latest_f2g,
+                         paste0('penn_chop_tp1_wideV_f2g_', latest_f2g, '.csv')),
+               check.names = FALSE)
+
+latest_emotrics = find_latest(file.path(project, 'tables', 'Emotrics'))
+emotrics = read.csv(file.path(project, 'tables', 'Emotrics', 
+                              latest_emotrics, 
+                              paste0('penn_chop_t1_emotrics_', 
+                                     latest_emotrics, '.csv')),
+                    check.names = FALSE)
+
+f2g_emotrics = merge(emotrics, f2g, all = TRUE)
+
+f2g_emotrics
+```
+
+
+## BBLIDs that are done on emotrics but not on f2g:
+
+```{r}
+emotrics[!emotrics$bbl_id %in% f2g$bbl_id, ]
+```
+
+## BBLIDs that are done on f2g but not on emotrics:
+
+```{r}
+f2g[!f2g$bbl_id %in% emotrics$bbl_id, ]
+```
+
+# Write the merged table
+
+```{r}
+# find latest date between latest_f2g and latest_emotrics
+latest_f2g =  latest_f2g %>% as.Date('%m%d%y')
+latest_emotrics = latest_emotrics %>% as.Date('%m%d%y')
+latest = c(latest_emotrics, latest_f2g)
+latest = sort(latest, decreasing = TRUE)[1] %>%
+  format('%m%d%y')
+
+# make latest date directory
+outdir = file.path(project, 'tables', 'Emotrics_F2G', latest)
+dir.create(outdir)
+
+write.csv(f2g_emotrics, 
+          file.path(outdir, 
+                    paste0('penn_chop_tp1_f2g_emotrics_', latest, '.csv')),
+          row.names = FALSE)
+
+f2g_emotrics_passed = f2g_emotrics[f2g_emotrics$emotrics_and_f2g == 1, ]
+write.csv(f2g_emotrics_passed,
+          file.path(outdir,
+                    paste0('penn_chop_tp1_f2g_emotrics_passed_', 
+                           latest, '.csv')),
+          row.names = FALSE)
+
+f2g_emotrics_passed_clean = f2g_emotrics_passed[f2g_emotrics_passed$group != '?',]
+write.csv(f2g_emotrics_passed_clean,
+          file.path(outdir,
+                    paste0('penn_chop_tp1_f2g_emotrics_passed_clean_', 
+                           latest, '.csv')),
+          row.names = FALSE)
+
+```
+
+
